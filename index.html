@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Human Body</title>
+  <meta name="description" content="Adult human anatomy, female and male, in anterior and posterior aspect. Structure and function by organ system." />
+  <meta name="theme-color" content="#080e16" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#inspector">Skip to the written plate</a>
+  <div class="app">
+    <aside class="ad-rail" aria-label="Advertisement">
+      <div class="ad-slot" data-ad-slot="left">
+        <div class="ad-fallback">
+          <p class="ad-kicker">Advertisement</p>
+          <p class="ad-size">160 × 600</p>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="top">
+        <div class="title-block">
+          <p class="kicker">Anatomy</p>
+          <h1>The human body</h1>
+        </div>
+        <div class="toolbar">
+          <div class="seg" id="sexes" role="group" aria-label="Which body to show">
+            <button type="button" data-sex="female" aria-pressed="false">Female</button>
+            <button type="button" data-sex="male" aria-pressed="false">Male</button>
+            <button type="button" data-sex="both" aria-pressed="true">Both</button>
+          </div>
+          <div class="search">
+            <input id="q" type="search" role="combobox" aria-expanded="false" aria-controls="results" aria-autocomplete="list" placeholder="Search structures" autocomplete="off" />
+            <ul id="results" role="listbox" hidden></ul>
+          </div>
+        </div>
+      </header>
+
+      <div class="system-row">
+        <div class="systems" id="systems" role="group" aria-label="Organ systems"></div>
+      </div>
+
+      <div class="workspace">
+        <section class="stage" aria-label="Anatomical plates">
+          <div class="stage-head">
+            <p class="plate-no">Plate 01</p>
+            <p class="plate-view">Anterior aspect</p>
+          </div>
+          <div class="figures" id="figures" data-count="2"></div>
+          <div class="tip" id="tip" hidden></div>
+          <p class="fineprint">Schematic adult anatomy for study. Proportions are simplified and not to scale. A study aid: it cannot diagnose or treat illness.</p>
+        </section>
+        <aside class="inspector" id="inspector" aria-live="polite"></aside>
+      </div>
+
+      <div class="ad-slot ad-slot--banner" data-ad-slot="bottom">
+        <div class="ad-fallback">
+          <p class="ad-kicker">Advertisement</p>
+          <p class="ad-size">728 × 90</p>
+        </div>
+      </div>
+    </main>
+
+    <aside class="ad-rail" aria-label="Advertisement">
+      <div class="ad-slot" data-ad-slot="right">
+        <div class="ad-fallback">
+          <p class="ad-kicker">Advertisement</p>
+          <p class="ad-size">160 × 600</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+  <noscript>
+    <p class="noscript">This atlas runs in the browser and needs JavaScript. It does not need an application server.</p>
+  </noscript>
+  <script src="js/data.js" defer></script>
+  <script src="js/figure.js" defer></script>
+  <script src="js/ads.js" defer></script>
+  <script src="js/app.js" defer></script>
+</body>
+</html>
