@@ -643,6 +643,33 @@ h1 {
   color: var(--muted);
 }
 
+.reading {
+  display: block;
+  text-decoration: none;
+  border-left: 2px solid var(--line);
+  padding: 6px 10px;
+  border-radius: 0 8px 8px 0;
+  color: var(--text);
+}
+
+.reading:hover { background: rgba(255, 255, 255, 0.04); }
+
+.reading b { display: block; font-weight: 520; }
+
+.reading span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reading-credit {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
 .disclaimer {
   margin: 18px 0 0;
   color: var(--faint);

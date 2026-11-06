@@ -558,6 +558,19 @@
     return `<div class="inspector-card"><div class="accent" style="background:${color}"></div><div class="inspector-body">${inner}</div></div>`;
   }
 
+  function readingBlock(part, sex) {
+    const reading = window.atlasReading ? window.atlasReading(part, sex) : null;
+    if (!reading) return "";
+    const note = part ? "Section for this area" : "The textbook for these plates";
+    return `
+      <h3>Textbook</h3>
+      <a class="reading" href="${esc(reading.url)}" target="_blank" rel="noopener noreferrer">
+        <b>${esc(reading.title)}</b>
+        <span>${esc(note)}</span>
+      </a>
+      <p class="reading-credit">${esc(reading.credit)}</p>`;
+  }
+
   function renderInspector() {
     const sel = state.selection;
     if (!sel) {
@@ -567,6 +580,7 @@
         <p class="panel-overview">${state.view === "posterior"
           ? "The dorsal surface of the adult. Spinous processes and the kidneys lie near this surface. The scapulae and the superficial muscles of the shared wall cover them on both plates. Each plate keeps its own pelvis and reproductive organs."
           : "The ventral surface of the adult. The sternum and the abdominal organs lie near this surface, with the lungs on either side of the mediastinum. Both plates show the shared rib cage, limbs, and muscles. The female plate keeps the HuBMAP organs. The male plate keeps the named vessels."}</p>
+        ${readingBlock(null, state.sex)}
         <h3>Organ systems</h3>
         <ul class="intro-list">
           ${window.ATLAS_SYSTEMS.map((system) => `
@@ -618,6 +632,7 @@
       ${losHtml}
       ${sections}
       ${related ? `<h3>Related structures</h3><div class="related">${related}</div>` : ""}
+      ${readingBlock(part, sel.sex)}
       <div class="panel-tools"><button type="button" class="texty" data-close="1">Close</button></div>
       <p class="disclaimer">Typical adult teaching values where a written account exists. A study aid: it cannot diagnose or treat illness.</p>`);
     inspector.querySelector(".inspector-card").scrollTop = 0;
