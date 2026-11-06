@@ -323,14 +323,8 @@ h1 {
   text-transform: uppercase;
 }
 
-.orient .seg-aspect {
-  flex: 0 0 auto;
-}
-
-.orient .seg-aspect button {
-  padding: 3px 8px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
+.aspect-name {
+  margin: 0;
   white-space: nowrap;
 }
 
@@ -365,6 +359,14 @@ h1 {
   font-size: 14px;
 }
 
+.source-note {
+  margin: 0 14px 8px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .body-view {
   position: relative;
   width: 100%;
@@ -378,6 +380,19 @@ h1 {
   height: 100%;
   display: block;
   cursor: grab;
+}
+
+.body-view .load-error {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 42%;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-style: italic;
+  line-height: 1.45;
 }
 
 .body-view[data-loading="1"]::after {
@@ -432,6 +447,8 @@ h1 {
 .tip {
   position: absolute;
   z-index: 5;
+  left: 0;
+  top: 0;
   width: min(300px, 70%);
   pointer-events: none;
   background: rgba(10, 14, 20, 0.94);

@@ -1,2 +1,4 @@
 tools/cache/
 tools/node_modules/
+models/*.data.js
+models/source/

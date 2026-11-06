@@ -16,6 +16,33 @@
   const anims = new WeakMap();
   let hi = 0;
   let hashLock = false;
+  let chipSig = "";
+  let searchIndex = [];
+  let tipKey = "";
+  let tipW = 280;
+  let tipH = 140;
+
+  window.ATLAS_CATALOG_READY = new Promise((resolve, reject) => {
+    const start = () => {
+      if (window.ATLAS_MESH_LIST) {
+        resolve();
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "js/catalog.js";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("catalog"));
+      document.head.appendChild(script);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(start));
+  });
+
+  tip.innerHTML = `<p class="tip-kicker"></p><h3></h3><p class="latin"></p><p class="overview"></p><p class="also" hidden></p>`;
+  const tipKicker = tip.querySelector(".tip-kicker");
+  const tipTitle = tip.querySelector("h3");
+  const tipLatin = tip.querySelector(".latin");
+  const tipOverview = tip.querySelector(".overview");
+  const tipAlso = tip.querySelector(".also");
 
   function esc(value) {
     return String(value).replace(/[&<>"']/g, (ch) => ({
@@ -87,6 +114,9 @@
   }
 
   function renderChips() {
+    const sig = [...state.enabled].sort().join(",");
+    if (sig === chipSig && systemsEl.childElementCount) return;
+    chipSig = sig;
     systemsEl.innerHTML = window.ATLAS_SYSTEMS.map((system) => `
       <button type="button" class="chip" data-system="${system.id}" style="--c:${system.color}" aria-pressed="${state.enabled.has(system.id)}">
         <span class="swatch"></span>${esc(system.name)}
@@ -104,45 +134,74 @@
     return ["Dexter", "Anterior", "Sinister"];
   }
 
-  function updateViewButtons() {
-    document.querySelectorAll("[data-view]").forEach((button) => {
-      button.setAttribute("aria-pressed", button.dataset.view === state.view ? "true" : "false");
-    });
-    const plateView = document.querySelector(".plate-view");
-    if (plateView) plateView.textContent = state.view === "posterior" ? "Posterior aspect" : "Anterior aspect";
+  function aspectPhrase(view) {
+    return view === "posterior" ? "Posterior aspect" : "Anterior aspect";
   }
 
-  function renderFigures() {
-    const sexes = state.sex === "both" ? ["female", "male"] : [state.sex];
+  function updateViewButtons() {
+    const plateView = document.querySelector(".plate-view");
+    if (plateView) plateView.textContent = aspectPhrase(state.view);
+  }
+
+  function describeCard(card, view) {
+    const marks = view === "posterior" ? ["Sinister", "Posterior aspect", "Dexter"] : ["Dexter", "Anterior aspect", "Sinister"];
+    const spans = card.querySelectorAll(".orient > span");
+    if (spans[0]) spans[0].textContent = marks[0];
+    if (spans[1]) spans[1].textContent = marks[2];
+    const name = card.querySelector(".aspect-name");
+    if (name) name.textContent = marks[1];
+    const caption = card.querySelector(".caption");
+    if (caption) caption.textContent = caption.textContent.replace(/anterior|posterior/, view);
+  }
+
+  function buildCard(sex) {
     const marks = orientMarks();
-    if (window.ATLAS_VIEW) window.ATLAS_VIEW.unmountAll();
-    figures.dataset.count = String(sexes.length);
-    figures.innerHTML = sexes.map((sex) => {
-      const label = sex === "female" ? "Female" : "Male";
-      const aspect = state.view === "posterior" ? "posterior" : "anterior";
-      const gap = sex === "female"
-        ? "This system is not in the female reference set."
-        : "This system is not in the male reference set.";
-      return `<article class="figure-card" data-sex="${sex}">
-        <div class="orient">
-          <span>${marks[0]}</span>
-          <div class="seg seg-aspect" role="group" aria-label="Aspect">
-            <button type="button" data-view="anterior" aria-pressed="${state.view === "anterior"}">Anterior</button>
-            <button type="button" data-view="posterior" aria-pressed="${state.view === "posterior"}">Posterior</button>
-          </div>
-          <span>${marks[2]}</span>
-        </div>
-        <button type="button" class="whole" hidden>Whole body</button>
-        <div class="body-view" data-sex="${sex}"></div>
-        <p class="coverage" hidden>${gap}</p>
-        <p class="caption">${label} · adult · ${aspect}</p>
-      </article>`;
-    }).join("");
-    if (window.ATLAS_VIEW) {
-      figures.querySelectorAll(".body-view").forEach((view) => {
-        window.ATLAS_VIEW.mount(view, view.dataset.sex);
-      });
+    const label = sex === "female" ? "Female" : "Male";
+    const gap = sex === "female"
+      ? "The HuBMAP female set has no meshes for this system."
+      : "The male set has no meshes for this system.";
+    const reference = sex === "female"
+      ? "HuBMAP organs, pelvis, and eye muscles, plus BodyParts3D vessels, nerves, and gut fitted to those organs. The skeleton and the other muscles are the shared body wall."
+      : "BodyParts3D organs, vessels, pelvis, and eye muscles, plus HuBMAP structures fitted to that body. The skeleton and the other muscles are the shared body wall, with Z-Anatomy muscles where BodyParts3D has none.";
+    const card = document.createElement("article");
+    card.className = "figure-card";
+    card.dataset.sex = sex;
+    card.innerHTML = `
+      <div class="orient">
+        <span>${marks[0]}</span>
+        <p class="aspect-name">${marks[1]} aspect</p>
+        <span>${marks[2]}</span>
+      </div>
+      <button type="button" class="whole" hidden>Whole body</button>
+      <div class="body-view" data-sex="${sex}"></div>
+      <p class="coverage" hidden>${gap}</p>
+      <p class="caption">${label} · adult · ${state.view}</p>
+      <p class="source-note">${reference}</p>`;
+    return card;
+  }
+
+  function syncCards() {
+    const sexes = state.sex === "both" ? ["female", "male"] : [state.sex];
+    const visible = new Set(sexes);
+    for (const sex of ["female", "male"]) {
+      let card = figures.querySelector(`.figure-card[data-sex="${sex}"]`);
+      if (!visible.has(sex)) {
+        if (card) card.hidden = true;
+        continue;
+      }
+      if (!card) {
+        card = buildCard(sex);
+        const male = figures.querySelector('.figure-card[data-sex="male"]');
+        if (sex === "female" && male) figures.insertBefore(card, male);
+        else figures.appendChild(card);
+      }
+      card.hidden = false;
+      describeCard(card, state.view);
+      const view = card.querySelector(".body-view");
+      if (window.ATLAS_VIEW && !view.querySelector("canvas")) window.ATLAS_VIEW.mount(view, sex);
+      else if (window.ATLAS_VIEW && window.ATLAS_VIEW.touch) window.ATLAS_VIEW.touch(sex);
     }
+    figures.dataset.count = String(sexes.length);
     applyVisibility();
     applySelectionVisuals();
     updateViewButtons();
@@ -215,7 +274,7 @@
       depth: item.depth == null ? (window.ATLAS_PARTS[item.id]?.depth || 0) : item.depth,
       ghost: !!item.ghost,
     }));
-    state.selection = { id: target.id, side, sex, stack: items };
+    state.selection = { id: target.id, side, sex, stack: items, shared: !!target.shared };
     if (!items.some((item) => item.id === target.id && (item.side || null) === side)) {
       state.selection.stack.push({
         id: target.id,
@@ -225,10 +284,14 @@
         ghost: false,
       });
     }
-    if (state.sex !== before || state.view !== viewBefore || !document.querySelector(".body-view")) renderFigures();
+    if (state.view !== viewBefore && window.ATLAS_VIEW) window.ATLAS_VIEW.setAspect(state.view);
+    if (state.sex !== before || !document.querySelector(".body-view")) syncCards();
     else {
       applyVisibility();
       applySelectionVisuals();
+      if (state.view !== viewBefore) {
+        document.querySelectorAll(".figure-card").forEach((card) => describeCard(card, state.view));
+      }
     }
     renderChips();
     updateSexButtons();
@@ -248,7 +311,7 @@
       else if (sex !== "both") state.selection.sex = sex;
       else if (need !== "both") state.selection.sex = need;
     }
-    renderFigures();
+    syncCards();
     renderChips();
     updateSexButtons();
     if (state.selection) zoomToSelection(false);
@@ -264,15 +327,7 @@
       if (aspect !== "both" && aspect !== view) state.selection = null;
     }
     updateViewButtons();
-    const marks = orientMarks();
-    document.querySelectorAll(".orient").forEach((row) => {
-      const spans = row.querySelectorAll(":scope > span");
-      if (spans[0]) spans[0].textContent = marks[0];
-      if (spans[1]) spans[1].textContent = marks[2];
-    });
-    document.querySelectorAll(".caption").forEach((caption) => {
-      caption.textContent = caption.textContent.replace(/anterior|posterior/, state.view);
-    });
+    document.querySelectorAll(".figure-card").forEach((card) => describeCard(card, state.view));
     if (window.ATLAS_VIEW) window.ATLAS_VIEW.setAspect(state.view);
     if (state.selection) zoomToSelection();
     else renderInspector();
@@ -357,22 +412,27 @@
     const sideBit = chosen.side
       ? (chosen.side === "patient-right" ? "Dexter" : "Sinister")
       : "";
-    tip.innerHTML = `
-      <p class="tip-kicker">${esc(systemNames(part.systems))}${sideBit ? " · " + esc(sideBit) : ""}</p>
-      <h3>${esc(displayName(chosen.id, chosen.side))}</h3>
-      <p class="latin">${esc(part.latin || "")}</p>
-      <p class="overview">${esc(part.overview)}</p>
-      ${others.length ? `<p class="also">Also in this line of sight: ${esc(others.join(", "))}</p>` : ""}`;
-    tip.hidden = false;
+    const key = `${chosen.id}|${chosen.side || ""}|${others.join("|")}`;
+    if (key !== tipKey) {
+      tipKey = key;
+      tipKicker.textContent = `${systemNames(part.systems)}${sideBit ? " · " + sideBit : ""}`;
+      tipTitle.textContent = displayName(chosen.id, chosen.side);
+      tipLatin.textContent = part.latin || "";
+      tipOverview.textContent = part.overview || "";
+      tipAlso.hidden = others.length === 0;
+      if (others.length) tipAlso.textContent = `Also in this line of sight: ${others.join(", ")}`;
+      tip.hidden = false;
+      tipW = tip.offsetWidth;
+      tipH = tip.offsetHeight;
+    } else if (tip.hidden) tip.hidden = false;
     const stage = document.querySelector(".stage");
     const rect = stage.getBoundingClientRect();
     let x = event.clientX - rect.left + 16;
     let y = event.clientY - rect.top + 18;
-    const maxX = Math.max(8, stage.clientWidth - tip.offsetWidth - 8);
-    const maxY = Math.max(8, stage.clientHeight - tip.offsetHeight - 8);
-    if (x > maxX) x = event.clientX - rect.left - tip.offsetWidth - 12;
-    tip.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
-    tip.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
+    const maxX = Math.max(8, stage.clientWidth - tipW - 8);
+    const maxY = Math.max(8, stage.clientHeight - tipH - 8);
+    if (x > maxX) x = event.clientX - rect.left - tipW - 12;
+    tip.style.transform = `translate3d(${Math.max(8, Math.min(x, maxX))}px, ${Math.max(8, Math.min(y, maxY))}px, 0)`;
     if (chosen.el) {
       document.querySelectorAll(".is-hot").forEach((node) => node.classList.remove("is-hot"));
       chosen.el.classList.add("is-hot");
@@ -400,12 +460,27 @@
   });
   figures.addEventListener("pointerleave", hideTip);
 
-  figures.addEventListener("click", (event) => {
-    const viewButton = event.target.closest("[data-view]");
-    if (viewButton) {
-      setView(viewButton.dataset.view);
-      return;
+  figures.addEventListener("atlas-aspect", (event) => {
+    const view = event.detail;
+    const card = event.target.closest(".figure-card");
+    if (card) describeCard(card, view);
+    if (state.view === view) return;
+    state.view = view;
+    if (state.selection) {
+      const locked = window.ATLAS_PARTS[state.selection.id].aspect || "both";
+      if (locked !== "both" && locked !== view) {
+        state.selection = null;
+        applyVisibility();
+        applySelectionVisuals();
+      }
     }
+    updateViewButtons();
+    if (state.selection) zoomToSelection();
+    else renderInspector();
+    setHash();
+  });
+
+  figures.addEventListener("click", (event) => {
     if (event.target.closest(".whole")) {
       unzoom();
       return;
@@ -421,7 +496,7 @@
   figures.addEventListener("atlas-pick", (event) => {
     const detail = event.detail;
     if (!detail) return;
-    select({ id: detail.id, side: detail.side, sex: detail.sex }, detail.stack || []);
+    select({ id: detail.id, side: detail.side, sex: detail.sex, shared: !!detail.shared }, detail.stack || []);
   });
 
   figures.addEventListener("atlas-hover", (event) => {
@@ -490,8 +565,8 @@
         <p class="sys-kicker">${state.view === "posterior" ? "Dorsal" : "Ventral"}</p>
         <h2 id="plate-title" tabindex="-1">${state.view === "posterior" ? "Posterior aspect" : "Anterior aspect"}</h2>
         <p class="panel-overview">${state.view === "posterior"
-          ? "The dorsal surface of the adult. Spinous processes, scapulae, and kidneys lie near this surface. Trapezius, latissimus dorsi, gluteus maximus, and the hamstrings cover them."
-          : "The ventral surface of the adult. The sternum, heart, and abdominal viscera lie near this surface, with the lungs on either side of the mediastinum."}</p>
+          ? "The dorsal surface of the adult. Spinous processes and the kidneys lie near this surface. The scapulae and the superficial muscles of the shared wall cover them on both plates. Each plate keeps its own pelvis and reproductive organs."
+          : "The ventral surface of the adult. The sternum and the abdominal organs lie near this surface, with the lungs on either side of the mediastinum. Both plates show the shared rib cage, limbs, and muscles. The female plate keeps the HuBMAP organs. The male plate keeps the named vessels."}</p>
         <h3>Organ systems</h3>
         <ul class="intro-list">
           ${window.ATLAS_SYSTEMS.map((system) => `
@@ -530,12 +605,15 @@
       return `<button type="button" data-goto="${esc(id)}" data-sex="${esc(sex)}">${esc(other.name)}</button>`;
     }).join("");
     const sideName = sel.side === "patient-right" ? "Dexter" : sel.side === "patient-left" ? "Sinister" : "";
+    const wallSystem = part.systems && (part.systems[0] === "skeletal" || part.systems[0] === "muscular");
+    const sharedWall = !!(sel.shared && wallSystem);
 
     inspector.innerHTML = card(color, `
       <p class="sys-kicker">${esc(systemNames(part.systems))} · ${esc(sel.sex)} · ${esc(state.view)}${sideName ? " · " + sideName : ""}</p>
       <h2 id="plate-title" tabindex="-1">${esc(displayName(sel.id, sel.side))}</h2>
       <p class="latin-line">${esc(part.latin || "")}</p>
       <p class="panel-overview">${esc(part.overview)}</p>
+      ${sharedWall ? `<p class="panel-overview">Shared body wall. This mesh is drawn on both plates. On the female plate it is fitted to the HuBMAP organs.</p>` : ""}
       ${stats ? `<div class="stats">${stats}</div>` : ""}
       ${losHtml}
       ${sections}
@@ -550,22 +628,49 @@
     searchInput.setAttribute("aria-expanded", "false");
   }
 
+  function buildSearchIndex() {
+    const aliasOf = new Map();
+    const groups = window.ATLAS_ALIAS || {};
+    Object.keys(groups).forEach((key) => {
+      groups[key].forEach((item) => {
+        let list = aliasOf.get(item.id);
+        if (!list) {
+          list = [];
+          aliasOf.set(item.id, list);
+        }
+        list.push(key.toLowerCase());
+      });
+    });
+    searchIndex = Object.entries(window.ATLAS_PARTS).map(([id, part]) => {
+      const aliases = (part.aliases || []).map((alias) => alias.toLowerCase());
+      const keys = aliasOf.get(id) || [];
+      return {
+        id,
+        part,
+        name: part.name.toLowerCase(),
+        latin: (part.latin || "").toLowerCase(),
+        aliases,
+        keys,
+        blob: [part.name, part.latin || "", ...(part.aliases || []), ...keys, ...(part.systems || [])].join(" ").toLowerCase(),
+      };
+    });
+  }
+
   function searchMatches(query) {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return Object.entries(window.ATLAS_PARTS).map(([id, part]) => {
-      const name = part.name.toLowerCase();
-      const latin = (part.latin || "").toLowerCase();
-      const aliases = part.aliases || [];
-      const blob = [name, latin, ...aliases.map((alias) => alias.toLowerCase()), ...(part.systems || [])].join(" ");
-      if (!blob.includes(q)) return null;
+    if (!q || !searchIndex.length) return [];
+    const found = [];
+    for (const entry of searchIndex) {
+      if (!entry.blob.includes(q)) continue;
       let score = 4;
-      if (name === q) score = 0;
-      else if (name.startsWith(q)) score = 1;
-      else if (latin.startsWith(q)) score = 2;
-      else if (aliases.some((alias) => alias.toLowerCase().startsWith(q))) score = 3;
-      return { id, part, score };
-    }).filter(Boolean).sort((a, b) => a.score - b.score || a.part.name.localeCompare(b.part.name)).slice(0, 8);
+      if (entry.name === q || entry.keys.includes(q)) score = 0;
+      else if (entry.name.startsWith(q)) score = 1;
+      else if (entry.latin.startsWith(q)) score = 2;
+      else if (entry.aliases.some((alias) => alias.startsWith(q))) score = 3;
+      found.push({ id: entry.id, part: entry.part, score });
+    }
+    found.sort((a, b) => a.score - b.score || a.part.name.localeCompare(b.part.name));
+    return found.slice(0, 8);
   }
 
   function renderResults() {
@@ -620,7 +725,9 @@
     searchInput.value = "";
     const part = window.ATLAS_PARTS[id];
     const sex = part.sex && part.sex !== "both" ? part.sex : (state.sex === "both" ? "female" : state.sex);
-    select({ id, side: part.side || null, sex }, [], { focus: true });
+    const system = part.systems && part.systems[0];
+    const shared = part.sex === "both" && (part.source === "bodyparts3d" || part.source === "z-anatomy") && (system === "skeletal" || system === "muscular");
+    select({ id, side: part.side || null, sex, shared }, [], { focus: true });
   }
 
   document.addEventListener("click", (event) => {
@@ -662,7 +769,7 @@
   function applyHash() {
     const raw = decodeURIComponent(location.hash.replace(/^#/, ""));
     if (!raw) {
-      renderFigures();
+      syncCards();
       renderInspector();
       return;
     }
@@ -686,7 +793,7 @@
     }
     state.sex = sex;
     state.view = view;
-    renderFigures();
+    syncCards();
     updateSexButtons();
     updateViewButtons();
     if (id) {
@@ -703,10 +810,12 @@
   renderChips();
   updateSexButtons();
   updateViewButtons();
-  if (location.hash) applyHash();
-  else {
-    renderFigures();
-    renderInspector();
-  }
+  renderInspector();
+  if (!location.hash) syncCards();
+  window.ATLAS_CATALOG_READY.then(() => {
+    buildSearchIndex();
+    if (location.hash) applyHash();
+    else if (searchInput.value) renderResults();
+  }).catch((err) => console.error(err));
   window.mountAds();
 })();

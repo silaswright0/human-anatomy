@@ -2,6 +2,8 @@
 
 An atlas of adult anatomy, female and male, anterior and posterior. It is a static site: HTML, CSS, and JavaScript, with no application server. Filter by organ system, and switch sex and aspect from the header.
 
+Both plates use one skeleton and one muscle layer: the BodyParts3D body wall, with Z-Anatomy muscles where that list has none. On the female plate the wall is fitted to the HuBMAP organs. Each plate keeps its own pelvis and reproductive organs. BodyParts3D vessels, nerves, and gut that the HuBMAP set does not include are fitted onto the female plate. HuBMAP structures the male plate does not include are fitted onto the male plate.
+
 Dexter is the right side of the body and sinister is the left. On the anterior aspect, dexter is at the left of the plate. On the posterior aspect, the plate is mirrored and dexter is at the right.
 
 ## Run it
