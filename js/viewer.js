@@ -127,7 +127,7 @@ function systemColor(systems) {
 
 function baseOpacity(systems) {
   const soft = SOFT[systems[0]];
-  return soft == null ? 0.92 : soft;
+  return soft == null ? 1 : soft;
 }
 
 function shown(state) {
@@ -203,7 +203,7 @@ function tag(object, sex, shared) {
   });
 }
 
-function fit(state) {
+function fit(state, allowScale, keepView) {
   const box = new THREE.Box3().setFromObject(state.root);
   if (box.isEmpty()) return;
   const size = box.getSize(new THREE.Vector3());
@@ -212,7 +212,7 @@ function fit(state) {
   const span = again.getSize(new THREE.Vector3());
   const center = again.getCenter(new THREE.Vector3());
   const height = Math.max(span.y, 0.001);
-  if (height > 5 || height < 0.4) {
+  if (allowScale && (height > 5 || height < 0.4)) {
     const scale = 1.7 / height;
     state.root.scale.multiplyScalar(scale);
     state.root.position.sub(center.multiplyScalar(scale));
@@ -239,12 +239,14 @@ function fit(state) {
   const fov = (state.camera.fov * Math.PI) / 180;
   const radius = (fittedSize.y * 0.58) / Math.tan(fov / 2);
   state.radius = radius;
-  state.theta = aspect === "posterior" ? Math.PI : 0;
-  state.phi = 1.48;
+  if (!keepView) {
+    state.theta = aspect === "posterior" ? Math.PI : 0;
+    state.phi = 1.48;
+  }
   state.target.set(0, 0, 0);
   state.home = {
-    theta: state.theta,
-    phi: state.phi,
+    theta: keepView ? state.home.theta : state.theta,
+    phi: keepView ? state.home.phi : state.phi,
     radius,
     target: state.target.clone(),
   };
@@ -300,6 +302,15 @@ function remember(state, record) {
   record.batch.userData.byInstance[record.instanceId] = record;
 }
 
+function releasePrepared(geometry, source) {
+  if (!geometry) return;
+  for (const name of Object.keys(geometry.attributes)) {
+    if (source.getAttribute(name) === geometry.getAttribute(name)) geometry.deleteAttribute(name);
+  }
+  if (source.getIndex() && geometry.getIndex() === source.getIndex()) geometry.setIndex(null);
+  geometry.dispose();
+}
+
 function makeBatch(state, meshes, rootInv) {
   const prepared = [];
   let vertCount = 0;
@@ -336,6 +347,7 @@ function makeBatch(state, meshes, rootInv) {
       const instanceId = batch.addInstance(geometryId);
       scratchMat.multiplyMatrices(rootInv, item.mesh.matrixWorld);
       batch.setMatrixAt(instanceId, scratchMat);
+      releasePrepared(item.geometry, item.mesh.geometry);
       remember(state, {
         id: info.id,
         side: info.side,
@@ -420,6 +432,7 @@ function stripSourceMeshes(state) {
 
 function writeColor(record) {
   scratchColor.copy(record.baseColor);
+  if (record.dimmed) scratchColor.multiplyScalar(0.45);
   if (record.selected) scratchColor.lerp(warm, 0.45);
   else if (record.hot) scratchColor.lerp(warm, 0.28);
   scratchVec4.set(scratchColor.r, scratchColor.g, scratchColor.b, Math.max(record.opacity, 0));
@@ -454,26 +467,40 @@ function paintSystems(state, enabled, selection) {
   const solo = enabled.size === 1;
   let visible = 0;
   const dirty = new Set();
+  const active = new Set();
   for (const record of state.records) {
     const on = record.systems.some((system) => enabled.has(system));
     const selected = !!(selection && selection.id === record.id && selection.sex === state.sex);
+    const solid = baseOpacity(record.systems) >= 0.98;
     let opacity = 0;
     if (on) {
       opacity = selected || solo ? 1 : baseOpacity(record.systems);
-      if (selection && !selected) opacity *= 0.38;
+      if (selection && !selected && !solid) opacity *= 0.38;
     }
     const isVisible = opacity > 0.03;
-    if (isVisible) visible += 1;
+    const dimmed = !!(on && selection && !selected && solid);
+    if (isVisible) {
+      visible += 1;
+      active.add(record.batch);
+    }
     const hot = state.hotId === record.id;
-    if (record.opacity === opacity && record.visible === isVisible && record.hot === hot && record.selected === selected) continue;
+    if (
+      record.opacity === opacity
+      && record.visible === isVisible
+      && record.hot === hot
+      && record.selected === selected
+      && record.dimmed === dimmed
+    ) continue;
     record.opacity = opacity;
     record.visible = isVisible;
+    record.dimmed = dimmed;
     record.hot = hot;
     record.selected = selected;
     record.batch.setVisibleAt(record.instanceId, isVisible);
     writeColor(record);
     dirty.add(record.batch);
   }
+  for (const batch of state.batches) batch.visible = active.has(batch);
   dirty.forEach((batch) => syncBatchMaterial(batch));
   const note = state.container.parentElement && state.container.parentElement.querySelector(".coverage");
   if (note) note.hidden = visible > 0;
@@ -501,6 +528,20 @@ function setHot(state, id) {
   state.dirty = true;
 }
 
+function collectHits(state, batches, hits) {
+  for (let b = 0; b < batches.length; b += 1) {
+    const batch = batches[b];
+    if (!batch.visible) continue;
+    const found = state.raycaster.intersectObject(batch, false);
+    for (let i = 0; i < found.length; i += 1) {
+      const hit = found[i];
+      const record = batch.userData.byInstance && batch.userData.byInstance[hit.batchId];
+      if (!record || !record.visible) continue;
+      hits.push(hit);
+    }
+  }
+}
+
 function raycast(state, point) {
   if (!state.pickReady) return [];
   const rect = state.canvas.getBoundingClientRect();
@@ -508,11 +549,16 @@ function raycast(state, point) {
   const x = ((point.clientX - rect.left) / rect.width) * 2 - 1;
   const y = -((point.clientY - rect.top) / rect.height) * 2 + 1;
   state.raycaster.setFromCamera({ x, y }, state.camera);
-  const hits = [];
+  const opaque = [];
+  const soft = [];
   for (const batch of state.batches) {
-    const found = state.raycaster.intersectObject(batch, false);
-    for (let i = 0; i < found.length; i += 1) hits.push(found[i]);
+    if (!batch.visible) continue;
+    if (batch.material && batch.material.transparent) soft.push(batch);
+    else opaque.push(batch);
   }
+  const hits = [];
+  collectHits(state, opaque, hits);
+  collectHits(state, soft, hits);
   hits.sort((a, b) => a.distance - b.distance);
   const stack = [];
   const limit = Math.min(8, hits.length);
@@ -539,7 +585,7 @@ function chooseHit(stack) {
     || null;
 }
 
-const orbitKeys = new Set();
+const panKeys = new Set();
 
 function typingTarget() {
   const node = document.activeElement;
@@ -558,34 +604,64 @@ function steerViews() {
   return picked.length ? picked : [];
 }
 
+function screenAxes(state) {
+  const phi = state.phi;
+  const theta = state.theta;
+  const sinPhi = Math.sin(phi);
+  const forwardX = -sinPhi * Math.sin(theta);
+  const forwardY = -Math.cos(phi);
+  const forwardZ = -sinPhi * Math.cos(theta);
+  const span = Math.hypot(forwardX, forwardZ) || 1;
+  const rightX = -forwardZ / span;
+  const rightZ = forwardX / span;
+  const rise = forwardY;
+  const upX = -forwardX * rise;
+  const upY = 1 - forwardY * rise;
+  const upZ = -forwardZ * rise;
+  const upSpan = Math.hypot(upX, upY, upZ) || 1;
+  return {
+    rightX,
+    rightZ,
+    upX: upX / upSpan,
+    upY: upY / upSpan,
+    upZ: upZ / upSpan,
+  };
+}
+
 function steer(dt) {
-  let yaw = 0;
-  let pitch = 0;
-  if (orbitKeys.has("ArrowLeft") || orbitKeys.has("a") || orbitKeys.has("A")) yaw += 1;
-  if (orbitKeys.has("ArrowRight") || orbitKeys.has("d") || orbitKeys.has("D")) yaw -= 1;
-  if (orbitKeys.has("ArrowUp") || orbitKeys.has("w") || orbitKeys.has("W")) pitch -= 1;
-  if (orbitKeys.has("ArrowDown") || orbitKeys.has("s") || orbitKeys.has("S")) pitch += 1;
-  if (!yaw && !pitch) return;
-  const targets = steerViews();
-  for (const state of targets) {
+  let x = 0;
+  let y = 0;
+  if (panKeys.has("ArrowLeft") || panKeys.has("a") || panKeys.has("A")) x -= 1;
+  if (panKeys.has("ArrowRight") || panKeys.has("d") || panKeys.has("D")) x += 1;
+  if (panKeys.has("ArrowUp") || panKeys.has("w") || panKeys.has("W")) y += 1;
+  if (panKeys.has("ArrowDown") || panKeys.has("s") || panKeys.has("S")) y -= 1;
+  if (!x && !y) return;
+  const viewsToMove = steerViews();
+  for (const state of viewsToMove) {
     state.goal = null;
-    state.theta += yaw * dt * 0.9;
-    state.phi = Math.min(2.6, Math.max(0.35, state.phi + pitch * dt * 0.7));
+    const step = dt * state.radius * 0.12;
+    const axes = screenAxes(state);
+    state.target.x += (-axes.rightX * x - axes.upX * y) * step;
+    state.target.y += (-axes.upY * y) * step;
+    state.target.z += (-axes.rightZ * x - axes.upZ * y) * step;
+    state.target.x = Math.min(0.6, Math.max(-0.6, state.target.x));
+    state.target.y = Math.min(1.85, Math.max(-0.25, state.target.y));
+    state.target.z = Math.min(0.6, Math.max(-0.6, state.target.z));
     state.dirty = true;
   }
 }
 
-const orbitNames = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d", "w", "s", "A", "D", "W", "S"]);
+const panNames = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d", "w", "s", "A", "D", "W", "S"]);
 
 window.addEventListener("keydown", (event) => {
-  if (typingTarget() || !orbitNames.has(event.key)) return;
-  orbitKeys.add(event.key);
+  if (typingTarget() || !panNames.has(event.key)) return;
+  panKeys.add(event.key);
   event.preventDefault();
 });
 window.addEventListener("keyup", (event) => {
-  orbitKeys.delete(event.key);
+  panKeys.delete(event.key);
 });
-window.addEventListener("blur", () => orbitKeys.clear());
+window.addEventListener("blur", () => panKeys.clear());
 
 function bind(state) {
   const canvas = state.canvas;
@@ -660,10 +736,84 @@ function bind(state) {
   }, { passive: false });
 }
 
+const copiedLayers = new Map();
+
+function layerNames(sex) {
+  return sex === "female"
+    ? ["female-organs", "shared-wall", "female-gaps"]
+    : ["male-organs", "shared-wall", "male-gaps"];
+}
+
+function requestModel(name) {
+  return location.protocol === "file:" ? loadPackedModel(name) : loadModel(`models/${name}.glb`);
+}
+
+function warmModels(sex) {
+  for (const name of layerNames(sex)) requestModel(name);
+  loadWallFit();
+}
+
+function disposeGltf(gltf) {
+  const geometries = new Set();
+  const materials = new Set();
+  const textures = new Set();
+  gltf.scene.traverse((node) => {
+    if (!node.isMesh) return;
+    if (node.geometry) geometries.add(node.geometry);
+    const list = Array.isArray(node.material) ? node.material : [node.material];
+    for (const material of list) if (material) materials.add(material);
+  });
+  for (const geometry of geometries) geometry.dispose();
+  for (const material of materials) {
+    for (const value of Object.values(material)) {
+      if (value && value.isTexture) textures.add(value);
+    }
+    material.dispose();
+  }
+  for (const texture of textures) texture.dispose();
+}
+
+function releaseSource(name, sex) {
+  let done = copiedLayers.get(name);
+  if (!done) {
+    done = new Set();
+    copiedLayers.set(name, done);
+  }
+  done.add(sex);
+  const owners = name === "shared-wall" ? ["female", "male"] : [name.startsWith("female") ? "female" : "male"];
+  const stillNeeded = owners.some((other) => {
+    if (done.has(other)) return false;
+    if (views.has(other) || jobs.some((job) => job.sex === other)) return true;
+    return name === "shared-wall";
+  });
+  if (stillNeeded) return;
+  const key = location.protocol === "file:" ? `packed:${name}` : `models/${name}.glb`;
+  const pending = cache.get(key);
+  cache.delete(key);
+  if (!pending || !pending.then) return;
+  pending.then((gltf) => {
+    if (gltf && gltf.scene) disposeGltf(gltf);
+  }).catch(() => {});
+}
+
+function viewAlive(state, sex) {
+  return views.get(sex) === state;
+}
+
+function present(state) {
+  state.batched = state.batches.length > 0;
+  state.ready = true;
+  paintSystems(state, state.enabled, state.selection);
+  if (state.pendingFocus && focus(state.sex, state.pendingFocus)) state.pendingFocus = null;
+  delete state.container.dataset.loading;
+}
+
 async function indexBatches(state) {
+  await new Promise((resolve) => setTimeout(resolve, 0));
   let count = 0;
   try {
     for (const batch of state.batches) {
+      if (!viewAlive(state, state.sex)) return;
       const geometryCount = batch._geometryCount || 0;
       for (let i = 0; i < geometryCount; i += 1) {
         const info = batch._geometryInfo && batch._geometryInfo[i];
@@ -676,44 +826,37 @@ async function indexBatches(state) {
   } catch (err) {
     console.error(err);
   }
+  if (!viewAlive(state, state.sex)) return;
   state.pickReady = true;
   state.container.dataset.pick = "1";
 }
 
 async function fill(state, sex) {
   state.container.dataset.loading = "1";
-  const names = sex === "female"
-    ? ["female-organs", "shared-wall", "female-gaps"]
-    : ["male-organs", "shared-wall", "male-gaps"];
-  const packed = location.protocol === "file:";
-  const loaded = [];
+  const loads = layerNames(sex).map((name) => ({ name, promise: requestModel(name) }));
+  const alignPromise = loadWallFit();
   let align = null;
-  try {
-    align = await loadWallFit();
-    for (const name of names) {
-      const gltf = packed ? await loadPackedModel(name) : await loadModel(`models/${name}.glb`);
-      loaded.push({ name, gltf });
-    }
-  } catch (err) {
-    showLoadError(state.container);
-    console.error(err);
-    delete state.container.dataset.loading;
-    return;
-  }
+  let framed = false;
   if (window.ATLAS_CATALOG_READY) {
     try { await window.ATLAS_CATALOG_READY; } catch (err) { console.error(err); }
   }
-  if (!views.has(sex) || views.get(sex) !== state) {
+  if (!viewAlive(state, sex)) {
     delete state.container.dataset.loading;
     return;
   }
   try {
-    for (const item of loaded) {
-      const clone = item.gltf.scene.clone(true);
+    for (const item of loads) {
+      const gltf = await item.promise;
+      if (!viewAlive(state, sex)) return;
+      const clone = gltf.scene.clone(true);
       const shared = item.name === "shared-wall";
       tag(clone, sex, shared);
-      const fitFemale = sex === "female" && (item.name === "shared-wall" || item.name === "female-gaps");
+      const fitFemale = sex === "female" && (shared || item.name === "female-gaps");
       const fitMale = sex === "male" && item.name === "male-gaps";
+      if (fitFemale || fitMale) {
+        if (!align) align = await alignPromise;
+        if (!viewAlive(state, sex)) return;
+      }
       if ((fitFemale || fitMale) && align && align.matrix) {
         const fitted = new THREE.Group();
         const matrix = new THREE.Matrix4().fromArray(align.matrix);
@@ -722,28 +865,26 @@ async function fill(state, sex) {
         fitted.add(clone);
         state.root.add(fitted);
       } else state.root.add(clone);
+      if (shared) fit(state, true, framed);
+      else if (!framed && item.name.endsWith("-organs")) fit(state, false, false);
+      if (shared || item.name.endsWith("-organs")) framed = true;
+      batchMeshes(state);
+      stripSourceMeshes(state);
+      releaseSource(item.name, sex);
+      present(state);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
     }
-    fit(state);
-    batchMeshes(state);
-    stripSourceMeshes(state);
-    state.batched = state.batches.length > 0;
-    state.ready = true;
-    paintSystems(state, state.enabled, state.selection);
-    if (state.pendingFocus) {
-      const pending = state.pendingFocus;
-      state.pendingFocus = null;
-      focus(state.sex, pending);
-    }
-    indexBatches(state);
   } catch (err) {
     console.error(err);
     if (!state.batches.length) showLoadError(state.container);
   } finally {
     delete state.container.dataset.loading;
   }
+  if (viewAlive(state, sex) && state.batches.length) indexBatches(state);
 }
 
 function enqueue(state, sex) {
+  warmModels(sex);
   jobs.push({ state, sex });
   pump();
 }
