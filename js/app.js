@@ -115,10 +115,14 @@
   function renderFigures() {
     const sexes = state.sex === "both" ? ["female", "male"] : [state.sex];
     const marks = orientMarks();
+    if (window.ATLAS_VIEW) window.ATLAS_VIEW.unmountAll();
     figures.dataset.count = String(sexes.length);
     figures.innerHTML = sexes.map((sex) => {
       const label = sex === "female" ? "Female" : "Male";
       const aspect = state.view === "posterior" ? "posterior" : "anterior";
+      const gap = sex === "female"
+        ? "This system is not in the female reference set."
+        : "This system is not in the male reference set.";
       return `<article class="figure-card" data-sex="${sex}">
         <div class="orient">
           <span>${marks[0]}</span>
@@ -129,106 +133,47 @@
           <span>${marks[2]}</span>
         </div>
         <button type="button" class="whole" hidden>Whole body</button>
-        ${window.renderBody(sex, state.view)}
+        <div class="body-view" data-sex="${sex}"></div>
+        <p class="coverage" hidden>${gap}</p>
         <p class="caption">${label} · adult · ${aspect}</p>
       </article>`;
     }).join("");
+    if (window.ATLAS_VIEW) {
+      figures.querySelectorAll(".body-view").forEach((view) => {
+        window.ATLAS_VIEW.mount(view, view.dataset.sex);
+      });
+    }
     applyVisibility();
     applySelectionVisuals();
     updateViewButtons();
   }
 
   function applyVisibility() {
-    const solo = state.enabled.size === 1;
-    document.querySelectorAll(".body-svg .part").forEach((part) => {
-      const systems = part.dataset.systems.split(" ").filter(Boolean);
-      const on = systems.some((system) => state.enabled.has(system));
-      const base = Number(part.dataset.baseOpacity || 1);
-      const svg = part.closest("svg");
-      const selected = state.selection
-        && part.dataset.id === state.selection.id
-        && svg.dataset.sex === state.selection.sex;
-      let opacity = 0;
-      if (selected) opacity = 1;
-      else if (on) opacity = solo ? 1 : base;
-      if (state.selection && !selected && opacity > 0) opacity *= 0.42;
-      part.style.opacity = String(opacity);
-      part.style.pointerEvents = opacity < 0.04 ? "none" : "auto";
-    });
+    if (window.ATLAS_VIEW) window.ATLAS_VIEW.setSystems(state.enabled, state.selection);
   }
 
   function applySelectionVisuals() {
-    document.querySelectorAll(".is-selected").forEach((node) => node.classList.remove("is-selected"));
     document.querySelectorAll(".figure-card").forEach((card) => card.classList.remove("is-quiet"));
     const sel = state.selection;
-    if (!sel) return;
-    const svg = document.querySelector(`.body-svg[data-sex="${sel.sex}"]`);
-    if (!svg) return;
-    const group = svg.querySelector(`.part[data-id="${CSS.escape(sel.id)}"]`);
-    if (group) {
-      group.classList.add("is-selected");
-      if (sel.side) group.querySelector(`[data-side="${sel.side}"]`)?.classList.add("is-selected");
-    }
-    if (state.sex === "both") {
-      document.querySelectorAll(".figure-card").forEach((card) => {
-        if (card.dataset.sex !== sel.sex) card.classList.add("is-quiet");
-      });
-    }
+    if (!sel || state.sex !== "both") return;
+    document.querySelectorAll(".figure-card").forEach((card) => {
+      if (card.dataset.sex !== sel.sex) card.classList.add("is-quiet");
+    });
   }
 
-  function zoomToSelection(animate) {
+  function zoomToSelection() {
     const sel = state.selection;
-    if (!sel) return;
-    const svg = document.querySelector(`.body-svg[data-sex="${sel.sex}"]`);
-    if (!svg) return;
-    const group = svg.querySelector(`.part[data-id="${CSS.escape(sel.id)}"]`);
-    if (!group) return;
-    const el = sel.side ? (group.querySelector(`[data-side="${sel.side}"]`) || group) : group;
-    let box;
-    try {
-      box = el.getBBox();
-    } catch (err) {
-      return;
-    }
-    if (!box || (!box.width && !box.height)) return;
-    const pad = 40;
-    let x = box.x - pad;
-    let y = box.y - pad;
-    let w = box.width + pad * 2;
-    let h = box.height + pad * 2;
-    const minW = 180;
-    const minH = 200;
-    if (w < minW) {
-      x -= (minW - w) / 2;
-      w = minW;
-    }
-    if (h < minH) {
-      y -= (minH - h) / 2;
-      h = minH;
-    }
-    if (w / h < 0.82) {
-      const next = h * 0.82;
-      x -= (next - w) / 2;
-      w = next;
-    }
-    svg.dataset.zoomed = "1";
-    const card = svg.closest(".figure-card");
+    if (!sel || !window.ATLAS_VIEW) return;
+    const card = document.querySelector(`.figure-card[data-sex="${sel.sex}"]`);
+    if (!card) return;
+    window.ATLAS_VIEW.focus(sel.sex, sel.id);
     card.querySelector(".whole").hidden = false;
-    const to = { x, y, w, h };
-    if (animate === false || reduced) setVB(svg, to);
-    else animateViewBox(svg, to);
   }
 
   function unzoom() {
-    document.querySelectorAll(".body-svg").forEach((svg) => {
-      if (svg.dataset.zoomed === "1") {
-        svg.dataset.zoomed = "0";
-        const home = parseVB(svg.dataset.home);
-        if (reduced) setVB(svg, home);
-        else animateViewBox(svg, home);
-      }
-      const card = svg.closest(".figure-card");
-      card.querySelector(".whole").hidden = true;
+    if (window.ATLAS_VIEW) window.ATLAS_VIEW.reset();
+    document.querySelectorAll(".whole").forEach((button) => {
+      button.hidden = true;
     });
   }
 
@@ -261,6 +206,7 @@
     const sex = resolveSex(part, target.sex);
     const aspect = part.aspect || "both";
     if (aspect !== "both") state.view = aspect;
+    const side = target.side || part.side || null;
     part.systems.forEach((system) => state.enabled.add(system));
     const items = (stack || []).map((item) => ({
       id: item.id,
@@ -269,17 +215,17 @@
       depth: item.depth == null ? (window.ATLAS_PARTS[item.id]?.depth || 0) : item.depth,
       ghost: !!item.ghost,
     }));
-    state.selection = { id: target.id, side: target.side || null, sex, stack: items };
-    if (!items.some((item) => item.id === target.id && item.side === (target.side || null))) {
+    state.selection = { id: target.id, side, sex, stack: items };
+    if (!items.some((item) => item.id === target.id && (item.side || null) === side)) {
       state.selection.stack.push({
         id: target.id,
-        side: target.side || null,
+        side,
         sex,
         depth: part.depth || 0,
         ghost: false,
       });
     }
-    if (state.sex !== before || state.view !== viewBefore || !document.querySelector(".body-svg")) renderFigures();
+    if (state.sex !== before || state.view !== viewBefore || !document.querySelector(".body-view")) renderFigures();
     else {
       applyVisibility();
       applySelectionVisuals();
@@ -317,8 +263,18 @@
       const aspect = window.ATLAS_PARTS[state.selection.id].aspect || "both";
       if (aspect !== "both" && aspect !== view) state.selection = null;
     }
-    renderFigures();
-    if (state.selection) zoomToSelection(false);
+    updateViewButtons();
+    const marks = orientMarks();
+    document.querySelectorAll(".orient").forEach((row) => {
+      const spans = row.querySelectorAll(":scope > span");
+      if (spans[0]) spans[0].textContent = marks[0];
+      if (spans[1]) spans[1].textContent = marks[2];
+    });
+    document.querySelectorAll(".caption").forEach((caption) => {
+      caption.textContent = caption.textContent.replace(/anterior|posterior/, state.view);
+    });
+    if (window.ATLAS_VIEW) window.ATLAS_VIEW.setAspect(state.view);
+    if (state.selection) zoomToSelection();
     else renderInspector();
     setHash();
   }
@@ -417,13 +373,16 @@
     if (x > maxX) x = event.clientX - rect.left - tip.offsetWidth - 12;
     tip.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
     tip.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
-    document.querySelectorAll(".is-hot").forEach((node) => node.classList.remove("is-hot"));
-    chosen.el.classList.add("is-hot");
+    if (chosen.el) {
+      document.querySelectorAll(".is-hot").forEach((node) => node.classList.remove("is-hot"));
+      chosen.el.classList.add("is-hot");
+    }
   }
 
   let raf = 0;
   let lastEvent = null;
   figures.addEventListener("pointermove", (event) => {
+    if (event.target.closest(".body-view")) return;
     if (event.pointerType === "touch") return;
     lastEvent = event;
     if (raf) return;
@@ -451,11 +410,27 @@
       unzoom();
       return;
     }
+    if (event.target.closest(".body-view")) return;
     if (!event.target.closest(".body-svg")) return;
     const stack = partsAt(event);
     const chosen = pick(stack);
     if (!chosen) return;
     select(chosen, stack);
+  });
+
+  figures.addEventListener("atlas-pick", (event) => {
+    const detail = event.detail;
+    if (!detail) return;
+    select({ id: detail.id, side: detail.side, sex: detail.sex }, detail.stack || []);
+  });
+
+  figures.addEventListener("atlas-hover", (event) => {
+    const detail = event.detail;
+    if (!detail) {
+      hideTip();
+      return;
+    }
+    showTip(detail.event, detail.chosen, detail.stack || []);
   });
 
   document.getElementById("sexes").addEventListener("click", (event) => {
@@ -566,7 +541,7 @@
       ${sections}
       ${related ? `<h3>Related structures</h3><div class="related">${related}</div>` : ""}
       <div class="panel-tools"><button type="button" class="texty" data-close="1">Close</button></div>
-      <p class="disclaimer">Typical adult teaching values. This plate is simplified and not to scale. A study aid: it cannot diagnose or treat illness.</p>`);
+      <p class="disclaimer">Typical adult teaching values where a written account exists. A study aid: it cannot diagnose or treat illness.</p>`);
     inspector.querySelector(".inspector-card").scrollTop = 0;
   }
 
@@ -601,7 +576,8 @@
     }
     hi = Math.min(hi, matches.length - 1);
     results.innerHTML = matches.map((match, index) => {
-      const badge = match.part.sex && match.part.sex !== "both" ? match.part.sex : "both plates";
+      const sideWord = match.part.side === "patient-right" ? "dexter" : match.part.side === "patient-left" ? "sinister" : "";
+      const badge = [match.part.sex && match.part.sex !== "both" ? match.part.sex : "both plates", sideWord].filter(Boolean).join(" · ");
       return `<li class="${index === hi ? "is-hi" : ""}" role="option"><button type="button" data-pick="${esc(match.id)}"><b>${esc(match.part.name)}</b><span class="sub">${esc(match.part.latin || "")} · ${esc(systemNames(match.part.systems))} · ${esc(badge)}</span></button></li>`;
     }).join("");
     results.hidden = false;
@@ -644,7 +620,7 @@
     searchInput.value = "";
     const part = window.ATLAS_PARTS[id];
     const sex = part.sex && part.sex !== "both" ? part.sex : (state.sex === "both" ? "female" : state.sex);
-    select({ id, side: null, sex }, [], { focus: true });
+    select({ id, side: part.side || null, sex }, [], { focus: true });
   }
 
   document.addEventListener("click", (event) => {
@@ -659,7 +635,7 @@
       return;
     }
     if (event.key === "Escape" && !typing) {
-      const zoomed = document.querySelector('.body-svg[data-zoomed="1"]');
+      const zoomed = document.querySelector(".whole:not([hidden])");
       if (zoomed) unzoom();
       else if (state.selection) clearSelection();
     }
@@ -698,8 +674,16 @@
       if (bit === "female" || bit === "male" || bit === "both") sex = bit;
       else if (bit === "anterior" || bit === "posterior") view = bit;
       else if (bit === "patient-right" || bit === "patient-left") side = bit;
-      else if (window.ATLAS_PARTS[bit]) id = bit;
+      else if (window.ATLAS_PARTS[bit] || (window.ATLAS_ALIAS && window.ATLAS_ALIAS[bit])) id = bit;
     });
+    if (id && window.atlasResolve) {
+      const resolved = window.atlasResolve(id, side, sex);
+      if (resolved) {
+        id = resolved.id;
+        side = resolved.side || "";
+        if (sex === "both" && resolved.sex) sex = resolved.sex;
+      }
+    }
     state.sex = sex;
     state.view = view;
     renderFigures();

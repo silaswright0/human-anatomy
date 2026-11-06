@@ -1,0 +1,15 @@
+BodyParts3D, © The Database Center for Life Science, licensed under CC Attribution-Share Alike 2.1 Japan.
+http://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html
+The male model is a simplified web export of the IS-A 4.0, 99% reduced release.
+If you share a file derived from it, keep this credit and the same license.
+
+Z-Anatomy, by Gauthier Kervyn, CC BY-SA 4.0.
+https://creativecommons.org/licenses/by-sa/4.0/
+models/supplement.glb contains only meshes from that project that BodyParts3D does not already name.
+The non-commercial inner-ear model (University of Dundee, CC BY-NC-SA 4.0) and the non-commercial kidney model (Lissie Cowley, CC BY-NC 4.0) are not included.
+This file stays separate so its share-alike terms are not mixed into the other models.
+
+Female model: Browne, Kristen, and Heidi Schlehlein. 2026. 3D Reference Organ Set for Female, v1.10.
+https://doi.org/10.48539/HBM637.DWBM.744
+HuBMAP CCF 3D Reference Object Library. CC BY 4.0.
+Pregnancy meshes (placenta and umbilical cord) were removed. The set is organs plus a partial skeleton.
